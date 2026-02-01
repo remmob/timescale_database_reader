@@ -75,7 +75,7 @@ A special Home Assistant card has been developed to work with this integration: 
 ## Installation
 1. Copy this repository to your Home Assistant `custom_components` directory:
    ```
-   custom_components/timescale_database_reader/
+   custom_components/timescale_database_reader/timescale_database_reader/
    ```
 2. Restart Home Assistant.
 
