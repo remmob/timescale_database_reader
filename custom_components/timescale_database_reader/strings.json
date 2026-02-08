@@ -1,0 +1,38 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Timescale Database Reader",
+                "description": "Configure the TimescaleDB connection.",
+                "data": {
+                    "name": "Naam",
+                    "host": "Host",
+                    "port": "Port",
+                    "username": "Gebruiker",
+                    "password": "Wachtwoord",
+                    "database": "Database",
+                    "table": "Tabel"
+                }
+            },
+            "reconfigure": {
+                "title": "Reconfigure Timescale Database Reader",
+                "description": "Update the connection settings.",
+                "data": {
+                    "name": "Naam",
+                    "host": "Host",
+                    "port": "Port",
+                    "username": "Gebruiker",
+                    "password": "Wachtwoord",
+                    "database": "Database",
+                    "table": "Tabel"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect"
+        },
+        "abort": {
+            "reconfigure_successful": "Reconfiguration was successful"
+        }
+    }
+}
