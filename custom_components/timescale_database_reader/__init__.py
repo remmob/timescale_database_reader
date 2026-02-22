@@ -219,6 +219,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             vol.Optional("entry_id"): str,
             vol.Optional("database"): str,
             vol.Optional("downsample", default=0): int,
+            vol.Optional("table"): str,
+            vol.Optional("downsample_method"): vol.In(["avg", "last"]),
         })
         @websocket_api.async_response
         async def handle_timescale_query(hass, connection, msg):
@@ -302,11 +304,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 if meta is None:
                     raise ValueError("No database metadata available")
 
-                table_ref = _safe_table_ref(meta.get("table", "ltss"))
-                columns = meta.get("columns") or set()
+                requested_table = msg.get("table")
+                if requested_table:
+                    table_ref = _safe_table_ref(requested_table)
+                else:
+                    table_ref = _safe_table_ref(meta.get("table", "ltss"))
+
+                default_table_ref = _safe_table_ref(meta.get("table", "ltss"))
+                if table_ref == default_table_ref:
+                    columns = meta.get("columns") or set()
+                else:
+                    cache = hass.data[DOMAIN].setdefault("_table_columns_cache", {})
+                    entry_cache = cache.setdefault(entry_id, {})
+                    columns = entry_cache.get(table_ref)
+                    if not columns:
+                        columns = await _fetch_table_columns(db, table_ref)
+                        entry_cache[table_ref] = columns
+
+                if "time" in columns:
+                    time_col = "time"
+                elif "bucket" in columns:
+                    time_col = "bucket"
+                elif "minute" in columns:
+                    time_col = "minute"
+                else:
+                    raise ValueError(f"Table {table_ref} has no supported time column (expected time, bucket or minute)")
+
                 has_value = "value" in columns
 
                 downsample = int(msg.get("downsample", 0))
+                downsample_method = str(msg.get("downsample_method") or "").lower()
+                if downsample_method not in {"avg", "last"}:
+                    if requested_table and time_col in {"bucket", "minute"}:
+                        downsample_method = "last"
+                    else:
+                        downsample_method = "avg"
                 _LOGGER.info(f"[WEBSOCKET] Query params: sensor_id={sensor_id}, start={start}, end={end}, downsample={downsample}, limit={limit}")
                 
                 if downsample and downsample > 0:
@@ -316,15 +348,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                     else:
                         value_expr = "CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END"
                         numeric_filter = "state ~ '^-?\\d+(\\.\\d+)?$'"
+                    if downsample_method == "last":
+                        downsample_expr = f"last({value_expr}, {time_col})"
+                    else:
+                        downsample_expr = f"avg({value_expr})"
                     bucket_query = fr"""
                         SELECT
-                            time_bucket(:bucket, time) AS bucket,
-                            avg({value_expr}) AS avg_state,
+                            time_bucket(:bucket, {time_col}) AS bucket,
+                            {downsample_expr} AS avg_state,
                             min({value_expr}) AS min_state,
                             max({value_expr}) AS max_state
                         FROM {table_ref}
                         WHERE entity_id = :entity_id
-                          AND time BETWEEN :start AND :end
+                          AND {time_col} BETWEEN :start AND :end
                           AND {numeric_filter}
                         GROUP BY bucket
                         ORDER BY bucket ASC
@@ -342,12 +378,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                         value_expr = "CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END"
                         numeric_filter = "state ~ '^-?\\d+(\\.\\d+)?$'"
                     query = fr"""
-                        SELECT time, {value_expr} AS state
+                                                SELECT {time_col} AS time, {value_expr} AS state
                         FROM {table_ref}
                         WHERE entity_id = :entity_id
-                          AND time BETWEEN :start AND :end
+                                                    AND {time_col} BETWEEN :start AND :end
                           AND {numeric_filter}
-                        ORDER BY time ASC
+                                                ORDER BY {time_col} ASC
                     """
                     rows = await db.fetch(query, entity_id=sensor_id, start=start, end=end)
                     _LOGGER.info(f"[WEBSOCKET] Raw query returned {len(rows) if isinstance(rows, list) else 'N/A'} rows")

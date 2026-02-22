@@ -1,7 +1,7 @@
 {
     "domain": "timescale_database_reader",
     "name": "timescale database reader",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "documentation": "https://github.com/remmob/timescale_database_reader",
     "requirements": [
         "psycopg2-binary",

@@ -8,7 +8,36 @@ This integration is designed specifically for TimescaleDB databases that are pop
 - **LTSS** (Long Term Statistics Store) — table: `ltss`
 - **Scribe** — table: `states`
 
-Other TimescaleDB schemas are not supported.
+
+## Recommended Views
+
+For optimal charting and uninterrupted lines, it is recommended to install the following SQL views and aggregates in your TimescaleDB:
+
+- For LTSS:
+    - Continuous aggregate: `sensor_minute_aggregate` (see `SQL/sensor_minute_aggregate_ltss.sql`)
+    - Prefilled view: `sensor_minute_ltss` (see `view sensor_minute_ltss.sql`)
+- For Scribe:
+    - Continuous aggregate: `sensor_minute_aggregate` (see `SQL/sensor_minute_aggregate_scribe.sql`)
+    - Prefilled view: `sensor_minute_scribe` (see `view sensor_minute_scribe.sql`)
+
+The aggregate views generate efficient 1-minute buckets per entity, and the prefilled views create a minute-prefilled time series for each entity, allowing smooth line and bar charts without gaps. Use the `table` option in your card or query to select the appropriate view.
+
+Example for LTSS:
+```yaml
+type: custom:timescale-plotly-card
+sensor_id: sensor.temperature_woonkamer
+database: ltss
+table: sensor_minute_ltss
+```
+
+Example for Scribe:
+```yaml
+type: custom:timescale-plotly-card
+sensor_id: sensor.amber_4h_average_ambient_temperature
+database: scribe
+table: sensor_minute_scribe
+```
+You can find the SQL files for creating these views in the `SQL` directory of this repository. Make sure to run the appropriate SQL scripts in your TimescaleDB to set up these views before using them in your Home Assistant cards or queries.
 
 
 ## Example: Query via WebSocket API
