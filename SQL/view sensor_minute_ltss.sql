@@ -1,3 +1,5 @@
+DROP VIEW IF EXISTS sensor_minute_ltss;
+
 CREATE VIEW sensor_minute_ltss AS
 SELECT
   minute,

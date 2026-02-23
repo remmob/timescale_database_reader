@@ -18,7 +18,12 @@ For optimal charting and uninterrupted lines, it is recommended to install the f
     - Prefilled view: `sensor_minute_ltss` (see `view sensor_minute_ltss.sql`)
 - For Scribe:
     - Continuous aggregate: `sensor_minute_aggregate` (see `SQL/sensor_minute_aggregate_scribe.sql`)
-    - Prefilled view: `sensor_minute_scribe` (see `view sensor_minute_scribe.sql`)
+    - Prefilled view: `sensor_minute_scribe` (see `view sensor_minute_scribe.sql`)<br/><br/>
+
+- to aggerate older data into 1-minute buckets run one time the following SQL 
+```sql
+CALL refresh_continuous_aggregate('sensor_minute_aggregate', NULL, NULL);
+```
 
 The aggregate views generate efficient 1-minute buckets per entity, and the prefilled views create a minute-prefilled time series for each entity, allowing smooth line and bar charts without gaps. Use the `table` option in your card or query to select the appropriate view.
 
@@ -87,7 +92,7 @@ This integration supports connecting to multiple TimescaleDB databases at the sa
 
 When querying data (for example, from a custom card or via the WebSocket API), you can specify which database to use by passing the `database` parameter. If you do not specify a database, the first configured database will be used by default.
 
-> **Important:** For Scribe, set the `table` option to `states`. For LTSS, set the `table` option to `ltss`. The correct table must be specified for each database in your query or card configuration.
+> **Important:** For Scribe, prefer `table: sensor_minute_scribe` (or `sensor_minute_aggregate`) after installing the SQL views. For LTSS, use `table: sensor_minute_ltss` (or `sensor_minute_aggregate`). Use raw tables (`states`/`ltss`) only when you explicitly need non-prefilled raw data.
 
 ### Example: Querying a specific database and table
 

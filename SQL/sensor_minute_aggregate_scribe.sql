@@ -1,15 +1,18 @@
 -- TimescaleDB SQL (Scribe)
 -- Continuous aggregate with 1-minute buckets per entity
--- Source table: states (columns: time, entity_id, state)
+-- Source table: states (columns: time, entity_id, state, value)
 -- Aggregate view: sensor_minute_aggregate
+
+DROP MATERIALIZED VIEW IF EXISTS sensor_minute_aggregate;
 
 CREATE MATERIALIZED VIEW sensor_minute_aggregate
 WITH (timescaledb.continuous) AS
 SELECT
-  time_bucket('1 minute', time) AS bucket,
-  entity_id,
-  last(state, time) AS state
-FROM states
+  time_bucket('1 minute', s.time) AS bucket,
+  s.entity_id,
+  last(s.state, s.time) AS state,
+  last(s.value, s.time) AS value
+FROM states s
 GROUP BY bucket, entity_id
 WITH NO DATA;
 

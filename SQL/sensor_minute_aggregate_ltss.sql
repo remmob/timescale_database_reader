@@ -3,6 +3,8 @@
 -- Source table: ltss (columns: time, entity_id, state)
 -- Aggregate view: sensor_minute_aggregate
 
+DROP MATERIALIZED VIEW IF EXISTS sensor_minute_aggregate;
+
 CREATE MATERIALIZED VIEW sensor_minute_aggregate
 WITH (timescaledb.continuous) AS
 SELECT
