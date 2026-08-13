@@ -344,10 +344,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 if downsample and downsample > 0:
                     if has_value:
                         value_expr = "COALESCE(value, CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END)"
-                        numeric_filter = "(value IS NOT NULL OR state ~ '^-?\\d+(\\.\\d+)?$')"
                     else:
                         value_expr = "CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END"
-                        numeric_filter = "state ~ '^-?\\d+(\\.\\d+)?$'"
                     if downsample_method == "last":
                         downsample_expr = f"last({value_expr}, {time_col})"
                     else:
@@ -356,12 +354,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                         SELECT
                             time_bucket(:bucket, {time_col}) AS bucket,
                             {downsample_expr} AS avg_state,
+                            last(state, {time_col}) AS state,
                             min({value_expr}) AS min_state,
                             max({value_expr}) AS max_state
                         FROM {table_ref}
                         WHERE entity_id = :entity_id
                           AND {time_col} BETWEEN :start AND :end
-                          AND {numeric_filter}
                         GROUP BY bucket
                         ORDER BY bucket ASC
                     """
@@ -373,17 +371,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 else:
                     if has_value:
                         value_expr = "COALESCE(value, CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END)"
-                        numeric_filter = "(value IS NOT NULL OR state ~ '^-?\\d+(\\.\\d+)?$')"
                     else:
                         value_expr = "CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END"
-                        numeric_filter = "state ~ '^-?\\d+(\\.\\d+)?$'"
                     query = fr"""
-                                                SELECT {time_col} AS time, {value_expr} AS state
+                        SELECT {time_col} AS time, state, {value_expr} AS avg_state
                         FROM {table_ref}
                         WHERE entity_id = :entity_id
-                                                    AND {time_col} BETWEEN :start AND :end
-                          AND {numeric_filter}
-                                                ORDER BY {time_col} ASC
+                          AND {time_col} BETWEEN :start AND :end
+                        ORDER BY {time_col} ASC
                     """
                     rows = await db.fetch(query, entity_id=sensor_id, start=start, end=end)
                     _LOGGER.info(f"[WEBSOCKET] Raw query returned {len(rows) if isinstance(rows, list) else 'N/A'} rows")
