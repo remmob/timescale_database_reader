@@ -170,6 +170,43 @@ sensor_id: sensor.temperature_woonkamer
 
 > **⚠️ Avoid `sensor_minute_scribe` (and `sensor_minute_ltss`).** These views build a grid of every minute since the oldest bucket × every entity and run a correlated subquery per cell against another view, so there is no usable index. It gets pathological for recently added entities: for every minute before their first reading the subquery has to walk the entire series to prove there is nothing there, so a window reaching further back than that entity's first reading times out (>120 s) while a window starting after it returns instantly. One such entity is enough to stall the queries of other cards on the same page. The `sensor_minute` table exists precisely to avoid this. The old files are kept in `SQL/` for reference.
 
+### Disk usage
+
+Raw state rows are the bulky part. Every row carries the entity's attributes as
+JSON — icon, friendly name, unit — repeated in full on each write. On a real
+installation that was 154 of roughly 205 bytes of payload per row.
+
+Compression fixes most of it. Measured on 443 entities writing about a million
+rows a day:
+
+| | before | after |
+|---|---|---|
+| One weekly `states_raw` chunk | 300 MB | 8.9 MB |
+| Thirteen older chunks | 383 MB | 16 MB |
+| `sensor_minute` (LOCF data compresses extremely well) | 10.9 GB | 22 MB |
+
+**Set `compress_after` well below `drop_after`.** If they are equal — both three
+months, say — the retention policy deletes each chunk at the exact moment it
+becomes eligible for compression, so nothing is ever compressed and the policy
+does nothing at all. The SQL here uses seven days.
+
+Check whether it is actually working:
+
+```sql
+SELECT hypertable_name,
+       count(*) FILTER (WHERE is_compressed) AS compressed,
+       count(*) AS chunks
+FROM timescaledb_information.chunks GROUP BY 1;
+```
+
+Only the chunk currently being written to should show up as uncompressed. If
+that chunk itself is large, shorten `chunk_time_interval`: the active chunk
+cannot be compressed, so its interval sets the floor on your uncompressed
+working set.
+
+Compression is a storage format change, not a summarisation: row counts, values
+and timestamps are unchanged, and `decompress_chunk()` reverses it.
+
 ### Keeping the minute table in step with reality
 
 The continuous aggregate trails real time by a minute or two. If the refresh procedure only ever appends rows *after* `max(minute)`, those trailing rows keep the value they happened to have when they were written and are never corrected — the lag becomes permanent.
