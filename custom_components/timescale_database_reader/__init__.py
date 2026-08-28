@@ -15,7 +15,7 @@ License: MIT
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from .const import DOMAIN, CONF_TABLE, CONF_NAME
+from .const import DOMAIN, CONF_TABLE, CONF_NAME, CONF_INCLUDE_EXTRA_COLUMNS
 from .db import TimescaleDBConnection
 from homeassistant.components import websocket_api
 from datetime import datetime
@@ -29,6 +29,32 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["binary_sensor"]
 
 _VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Columns the query already fills in itself, so they are never selected twice
+# when include_extra_columns is enabled.
+_RESERVED_COLUMNS = {"entity_id", "value", "state", "time", "bucket", "minute"}
+
+
+def _extra_column_list(columns, include_extra: bool) -> list[str]:
+    """
+    Work out which additional columns to select.
+
+    Only used when include_extra_columns is enabled on the config entry. The
+    names come straight from information_schema through _fetch_table_columns,
+    so they are by definition real column names of that table; nothing from the
+    frontend ends up in the SQL. They are quoted anyway, so a name with capitals
+    or a space cannot break the query.
+
+    Args:
+        columns: Set of column names of the queried table
+        include_extra: Whether the option is enabled
+
+    Returns:
+        list[str]: Sorted column names, empty when the option is off
+    """
+    if not include_extra or not columns:
+        return []
+    return sorted(c for c in columns if c not in _RESERVED_COLUMNS)
 
 
 def _safe_identifier(value: str, name: str) -> str:
@@ -149,6 +175,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         "database": db_conf.get("database"),
         "table": db_conf.get(CONF_TABLE, "ltss"),
         "name": db_conf.get(CONF_NAME, entry.title),
+        "include_extra_columns": bool(db_conf.get(CONF_INCLUDE_EXTRA_COLUMNS, False)),
     }
     try:
         table_ref = _safe_table_ref(db_conf.get(CONF_TABLE, "ltss"))
@@ -220,7 +247,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             vol.Optional("database"): str,
             vol.Optional("downsample", default=0): int,
             vol.Optional("table"): str,
-            vol.Optional("downsample_method"): vol.In(["avg", "last"]),
+            vol.Optional("downsample_method"): vol.In(["avg", "last", "sum"]),
         })
         @websocket_api.async_response
         async def handle_timescale_query(hass, connection, msg):
@@ -332,9 +359,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
                 has_value = "value" in columns
 
+                # Opt in per config entry. Off means the queries below are
+                # character for character the same as before.
+                extra_cols = _extra_column_list(
+                    columns, bool(meta.get("include_extra_columns", False))
+                )
+                extra_bucket_select = "".join(
+                    f',\n                            last("{c}", {time_col}) AS "{c}"'
+                    for c in extra_cols
+                )
+                extra_raw_select = "".join(f', "{c}"' for c in extra_cols)
+                if extra_cols:
+                    _LOGGER.debug(
+                        "[WEBSOCKET] Including extra columns for %s: %s",
+                        table_ref, ", ".join(extra_cols)
+                    )
+
                 downsample = int(msg.get("downsample", 0))
                 downsample_method = str(msg.get("downsample_method") or "").lower()
-                if downsample_method not in {"avg", "last"}:
+                # "sum" is meant for series that are already a quantity per
+                # bucket, a cost or a number of kilowatt-hours per hour. When the
+                # card then asks for daily buckets those hours should be added up,
+                # not averaged or reduced to the last value. Only used when the
+                # card asks for it explicitly; the choice below is unchanged.
+                if downsample_method not in {"avg", "last", "sum"}:
                     if requested_table and time_col in {"bucket", "minute"}:
                         downsample_method = "last"
                     else:
@@ -348,6 +396,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                         value_expr = "CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END"
                     if downsample_method == "last":
                         downsample_expr = f"last({value_expr}, {time_col})"
+                    elif downsample_method == "sum":
+                        downsample_expr = f"sum({value_expr})"
                     else:
                         downsample_expr = f"avg({value_expr})"
                     bucket_query = fr"""
@@ -356,7 +406,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                             {downsample_expr} AS avg_state,
                             last(state, {time_col}) AS state,
                             min({value_expr}) AS min_state,
-                            max({value_expr}) AS max_state
+                            max({value_expr}) AS max_state{extra_bucket_select}
                         FROM {table_ref}
                         WHERE entity_id = :entity_id
                           AND {time_col} BETWEEN :start AND :end
@@ -374,7 +424,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                     else:
                         value_expr = "CASE WHEN state ~ '^-?\\d+(\\.\\d+)?$' THEN state::double precision END"
                     query = fr"""
-                        SELECT {time_col} AS time, state, {value_expr} AS avg_state
+                        SELECT {time_col} AS time, state, {value_expr} AS avg_state{extra_raw_select}
                         FROM {table_ref}
                         WHERE entity_id = :entity_id
                           AND {time_col} BETWEEN :start AND :end

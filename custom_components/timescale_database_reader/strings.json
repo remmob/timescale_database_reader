@@ -24,7 +24,11 @@
                     "username": "Gebruiker",
                     "password": "Wachtwoord",
                     "database": "Database",
-                    "table": "Tabel"
+                    "table": "Tabel",
+                    "include_extra_columns": "Extra kolommen meesturen"
+                },
+                "data_description": {
+                    "include_extra_columns": "Stuurt naast de vaste kolommen ook de overige kolommen van de opgevraagde tabel mee. Laat dit uit als je niets bijzonders doet; alleen views met eigen kolommen hebben er iets aan."
                 }
             }
         },
@@ -33,6 +37,30 @@
         },
         "abort": {
             "reconfigure_successful": "Reconfiguration was successful"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Timescale Database Reader",
+                "description": "Update the connection settings.",
+                "data": {
+                    "name": "Naam",
+                    "host": "Host",
+                    "port": "Port",
+                    "username": "Gebruiker",
+                    "password": "Wachtwoord",
+                    "database": "Database",
+                    "table": "Tabel",
+                    "include_extra_columns": "Extra kolommen meesturen"
+                },
+                "data_description": {
+                    "include_extra_columns": "Stuurt naast de vaste kolommen ook de overige kolommen van de opgevraagde tabel mee. Laat dit uit als je niets bijzonders doet; alleen views met eigen kolommen hebben er iets aan."
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect"
         }
     }
 }

@@ -3,7 +3,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_USERNAME, CONF_PASSWORD
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
-from .const import DOMAIN, CONF_TABLE, CONF_NAME
+from .const import DOMAIN, CONF_TABLE, CONF_NAME, CONF_INCLUDE_EXTRA_COLUMNS
 
 CONF_DATABASE = "database"
 
@@ -67,6 +67,10 @@ class TimescaleDatabaseReaderConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             vol.Required(CONF_PASSWORD, default=data.get(CONF_PASSWORD, "")): str,
             vol.Required(CONF_DATABASE, default=data.get(CONF_DATABASE, "")): str,
             vol.Required(CONF_TABLE, default=data.get(CONF_TABLE, "ltss")): str,
+            vol.Optional(
+                CONF_INCLUDE_EXTRA_COLUMNS,
+                default=data.get(CONF_INCLUDE_EXTRA_COLUMNS, False),
+            ): bool,
         })
         return self.async_show_form(
             step_id="reconfigure",
@@ -143,6 +147,12 @@ class TimescaleDatabaseReaderOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Required(CONF_PASSWORD, default=data.get(CONF_PASSWORD, "")): str,
             vol.Required(CONF_DATABASE, default=data.get(CONF_DATABASE, "")): str,
             vol.Required(CONF_TABLE, default=data.get(CONF_TABLE, "ltss")): str,
+            # Opt in: leave this off and every query returns exactly the same
+            # columns as before.
+            vol.Optional(
+                CONF_INCLUDE_EXTRA_COLUMNS,
+                default=data.get(CONF_INCLUDE_EXTRA_COLUMNS, False),
+            ): bool,
         })
         return self.async_show_form(
             step_id="init",

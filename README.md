@@ -1,3 +1,6 @@
+[![en](https://img.shields.io/badge/lang-en-red.svg)](README.md)
+[![nl](https://img.shields.io/badge/lang-nl-orange.svg)](README.nl.md)
+
 # Timescale Database Reader
 
 A Home Assistant integration that reads historical data from a TimescaleDB database filled by the [LTSS integration](https://github.com/freol35241/ltss) or the [Scribe integration](https://github.com/jonathan-gatard/scribe), and exposes it over the Home Assistant WebSocket API.
@@ -82,6 +85,7 @@ steps 2 and 3 are done.
 | `database` | `statistics` | Database name |
 | `name` | `Statistics` | Friendly name; also what `database:` in a card matches on |
 | `table` | `sensor_minute` | Default table when a query does not pass `table` |
+| `include_extra_columns` | `false` | Also return the remaining columns of the queried table. Off by default — see [Extra columns](#extra-columns-opt-in) |
 
 Add one integration entry per database if you have several (for example LTSS **and** Scribe).
 
@@ -241,7 +245,7 @@ Message type: `timescale/query`.
 | `end` | ISO string or Unix timestamp | **yes** | Window end |
 | `limit` | int | no | Max rows returned (0 = no limit, max 10000). Applied to the tail of the result |
 | `downsample` | int | no | Bucket size in seconds (0 = raw rows) |
-| `downsample_method` | `avg` \| `last` | no | Aggregation within a bucket. Defaults to `last` for minute/aggregate tables, otherwise `avg` |
+| `downsample_method` | `avg` \| `last` \| `sum` | no | Aggregation within a bucket. Defaults to `last` for minute/aggregate tables, otherwise `avg`. Use `sum` for rows that are already a quantity per bucket — a cost or a number of kWh per hour — so that a query for daily buckets adds those hours up instead of averaging them or taking the last one |
 | `table` | string | no | Table or view to read; falls back to the entry's configured table |
 | `database` | string | no | Which connection to use, matched on database name or friendly name |
 | `entry_id` | string | no | Config entry to use; takes precedence over `database` |
@@ -270,6 +274,114 @@ With `downsample = 0`:
 | `avg_state` | Resolved numeric value — **use this** |
 
 > Remember the `state` / `value` split above: for numeric entities `state` is the placeholder `'0'`. Always read `avg_state`, and fall back to `state` only when you are mapping text states.
+
+### Extra columns (opt in)
+
+The response set above is fixed. Query a view that carries columns of its own — a label, a unit, a
+formatted timestamp — and those columns are dropped, because the reader never selected them.
+
+Enable **Include extra columns** on the config entry and every remaining column of the queried table
+comes along. Reserved names are never selected twice: `entity_id`, `value`, `state`, `time`,
+`bucket` and `minute` are already handled by the query itself.
+
+```sql
+-- with downsample > 0, each extra column is wrapped in last() so GROUP BY stays valid
+SELECT time_bucket(:bucket, bucket) AS bucket,
+       last(value, bucket)  AS avg_state,
+       last(state, bucket)  AS state,
+       min(value)           AS min_state,
+       max(value)           AS max_state,
+       last("label", bucket) AS "label",
+       last("unit",  bucket) AS "unit"
+FROM my_view
+WHERE entity_id = :entity_id AND bucket BETWEEN :start AND :end
+GROUP BY bucket
+```
+
+Points to keep in mind:
+
+- **Off by default.** With the option disabled the generated SQL is character for character what it
+  was before, so existing dashboards cannot be affected.
+- **The setting is per config entry, not per table.** Switch it on and *every* table queried through
+  that connection returns its extra columns. For plain state tables that changes nothing: a table
+  whose columns are only `time`/`minute`, `entity_id`, `state` and `value` has no remaining columns.
+- **No injection risk.** Column names come from `information_schema` through `_fetch_table_columns`,
+  so they are by definition real columns of that table. They are quoted as well, so names with
+  capitals or spaces are safe.
+- **Charts ignore unknown keys.** Only a table view will show the extra columns. Note that in the
+  timescale-plotly-card `table_columns` *orders* the columns rather than filtering them: anything
+  not listed is appended at the end.
+
+#### Use case: daily peaks as a readable table
+
+The question was simple enough: what was the highest load today, when did it happen, and how long
+did it last? A peak of one second says nothing, so the duration matters as much as the value.
+
+All of that is a query, not a state machine — the raw states are already in the database. A daily
+table holds one row per sensor per day: highest value, the moment the peak *started*, the moment the
+value itself topped out, and how long it stayed within a small margin of the peak. A view then
+presents those rows per sensor, with the readable bits as their own columns:
+
+```sql
+CREATE OR REPLACE VIEW sensor_extremes_single AS
+SELECT (day::timestamp AT TIME ZONE 'Europe/Amsterdam') AS bucket,
+       entity_id || '_max' AS entity_id,
+       max_value           AS value,
+       max_value::text     AS state,
+       label                                                   AS sensor,
+       round(max_value::numeric, 2) || ' ' || unit             AS waarde,
+       to_char(max_start AT TIME ZONE 'Europe/Amsterdam',
+               'HH24:MI:SS')                                   AS tijd,
+       max_episode_s || ' s'                                   AS duur
+FROM sensor_extremes_daily JOIN sensor_extremes_config USING (entity_id);
+```
+
+Two details that are easy to get wrong:
+
+- **Cast the day in the right time zone.** A plain `day::timestamptz` on a server running UTC lands
+  on midnight UTC, which shows up as 02:00 in a Dutch frontend. `AT TIME ZONE` fixes it and handles
+  DST along the way.
+- **A value holds until the next reading.** Home Assistant only writes on change, so a duration is
+  the gap between two readings (`lead(time)`), never a count of rows.
+
+With **Include extra columns** enabled, the card can show those columns directly:
+
+```yaml
+type: custom:timescale-plotly-card
+database: scribe
+table: sensor_extremes_single
+show_chart: false
+show_table: true
+table_columns: [sensor, waarde, tijd, duur]
+energy_time_ranges: [today, week, month, year, years, custom]
+default_range: today
+entities:
+  - sensor_id: sensor.power_inuse_total_max
+    name: Total power in use
+  - sensor_id: sensor.dsmr_sensor_voltage_l1_max
+    name: Voltage L1 highest
+```
+
+| sensor | waarde | tijd | duur |
+|---|---|---|---|
+| Gebruikt vermogen totaal | 4063 W | 17:45:57 | 6 s |
+| Spanning L1 hoogste | 244.9 V | 10:30:56 | 183 s |
+| Spanning L1 laagste | 232.5 V | 10:52:12 | 35 s |
+
+The card still adds `series`, `bucket`, `avg_state`, `state`, `min_state` and `max_state` of its
+own, and `table_columns` does not filter those away. Put the four you want first and hide the rest
+with card-mod:
+
+```yaml
+card_mod:
+  style: |
+    .ts-data-table td:nth-child(n+5),
+    .ts-data-table th:nth-child(n+5) { display: none !important; }
+    .ts-data-table td, .ts-data-table th { white-space: normal !important; }
+```
+
+That last line matters too: the card sets `white-space: nowrap` on every cell and `overflow-x: auto`
+on the container, so one long cell is enough to produce a horizontal scrollbar.
 
 ### Example
 
