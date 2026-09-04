@@ -1,6 +1,8 @@
 [![en](https://img.shields.io/badge/lang-en-red.svg)](README.md)
 [![nl](https://img.shields.io/badge/lang-nl-orange.svg)](README.nl.md)
 
+![Version](https://img.shields.io/github/v/release/remmob/timescale_database_reader 'Release') ![Downloads](https://img.shields.io/github/downloads/remmob/timescale_database_reader/total 'Downloads')
+
 # Timescale Database Reader
 
 A Home Assistant integration that reads historical data from a TimescaleDB database filled by the [LTSS integration](https://github.com/freol35241/ltss) or the [Scribe integration](https://github.com/jonathan-gatard/scribe), and exposes it over the Home Assistant WebSocket API.
